@@ -40,6 +40,7 @@
 // brevity sake we won't implement all of the subcommands, only a few.
 
 use clap::{App, AppSettings, Arg};
+use std::fs;
 
 fn main() {
     let matches = App::new("rgit")
@@ -125,10 +126,19 @@ fn main() {
             println!(
                 "init a repo"
             );
+            data();
+
+
         }
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
 
     // Continued program logic goes here...
+}
+
+static RGIT_DIR: &str = ".rgit";
+
+fn data() -> std::io::Result<()> {
+    fs::create_dir(RGIT_DIR)
 }
