@@ -41,6 +41,8 @@
 
 use clap::{App, AppSettings, Arg};
 use std::fs;
+use std::fs::File;
+use std::io::Write;
 
 fn main() {
     let matches = App::new("rgit")
@@ -51,6 +53,11 @@ fn main() {
             App::new("init")
                 .about("init repos")
                 .license("MIT OR Apache-2.0")
+        )
+        .subcommand(
+            App::new("hash-object")
+                .about("hash file")
+                .arg(Arg::new("file").about("file to hash").required(true)),
         )
         .subcommand(
             App::new("clone")
@@ -128,8 +135,15 @@ fn main() {
             );
             data();
 
+        }
+        Some(("hash-object", hash_matches)) => {
+            // Now we have a reference to clone's matches
+            let file = hash_matches.value_of("file").unwrap();
+            println!("Hashing {}",file) ;
+            hash_object(file);
 
         }
+        
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -138,7 +152,21 @@ fn main() {
 }
 
 static RGIT_DIR: &str = ".rgit";
+static RGIT_DIR_OBJECT: &str = ".rgit/objects";
 
 fn data() -> std::io::Result<()> {
     fs::create_dir(RGIT_DIR)
+}
+use sha1::{Sha1, Digest};
+use std::error::Error;
+
+fn hash_object(file_path: &str) -> Result<(), Box<dyn Error>> {
+    fs::create_dir(RGIT_DIR_OBJECT)?;
+    let data = fs::read(file_path)?;
+    let mut hasher = Sha1::new();
+    hasher.update(&data);
+    let path = format!("{}/objects/{}", RGIT_DIR, String::from_utf8_lossy(&hasher.finalize()));
+    let mut file = File::create(path)?;
+    file.write(&data)?;
+    Ok(())
 }
