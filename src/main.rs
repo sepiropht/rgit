@@ -40,8 +40,10 @@
 // brevity sake we won't implement all of the subcommands, only a few.
 
 use clap::{App, AppSettings, Arg};
+use hex;
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::io::Write;
 
 fn main() {
@@ -52,12 +54,17 @@ fn main() {
         .subcommand(
             App::new("init")
                 .about("init repos")
-                .license("MIT OR Apache-2.0")
+                .license("MIT OR Apache-2.0"),
         )
         .subcommand(
             App::new("hash-object")
                 .about("hash file")
                 .arg(Arg::new("file").about("file to hash").required(true)),
+        )
+        .subcommand(
+            App::new("cat-file")
+                .about("print object knowing it hash")
+                .arg(Arg::new("hash").about("hash to print").required(true)),
         )
         .subcommand(
             App::new("clone")
@@ -130,20 +137,22 @@ fn main() {
         }
         Some(("init", _)) => {
             // Now we have a reference to add's matches
-            println!(
-                "init a repo"
-            );
+            println!("init a repo");
             data();
-
         }
         Some(("hash-object", hash_matches)) => {
             // Now we have a reference to clone's matches
             let file = hash_matches.value_of("file").unwrap();
-            println!("Hashing {}",file) ;
+            println!("Hashing {}", file);
             hash_object(file);
-
         }
-        
+        Some(("cat-file", hash_matches)) => {
+            // Now we have a reference to clone's matches
+            let hash = hash_matches.value_of("hash").unwrap();
+            println!("display file {}", hash);
+            cat_file(hash);
+        }
+
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
     }
@@ -157,16 +166,29 @@ static RGIT_DIR_OBJECT: &str = ".rgit/objects";
 fn data() -> std::io::Result<()> {
     fs::create_dir(RGIT_DIR)
 }
-use sha1::{Sha1, Digest};
+use sha1::{Digest, Sha1};
 use std::error::Error;
 
 fn hash_object(file_path: &str) -> Result<(), Box<dyn Error>> {
-    fs::create_dir(RGIT_DIR_OBJECT)?;
+    // fs::create_dir(RGIT_DIR_OBJECT)?;
     let data = fs::read(file_path)?;
     let mut hasher = Sha1::new();
     hasher.update(&data);
-    let path = format!("{}/objects/{}", RGIT_DIR, String::from_utf8_lossy(&hasher.finalize()));
+    let hash = hex::encode(hasher.finalize());
+    let path = format!("{}/objects/{}", RGIT_DIR, hash);
     let mut file = File::create(path)?;
     file.write(&data)?;
     Ok(())
+}
+
+fn cat_file(hash: &str) {
+    println!(
+        "print file {}",
+        String::from_utf8_lossy(&get_object(hash).expect("string"))
+    );
+}
+
+fn get_object(oid: &str) -> io::Result<Vec<u8>> {
+    let file_path = format!("{}/objects/{}", RGIT_DIR, oid);
+    Ok(fs::read(file_path)?)
 }
