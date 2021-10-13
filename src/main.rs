@@ -44,6 +44,7 @@ use hex;
 use std::fs;
 use std::fs::File;
 use std::io;
+use std::io::BufRead;
 use std::io::Write;
 
 fn main() {
@@ -144,7 +145,7 @@ fn main() {
             // Now we have a reference to clone's matches
             let file = hash_matches.value_of("file").unwrap();
             println!("Hashing {}", file);
-            hash_object(file);
+            hash_object(file, None);
         }
         Some(("cat-file", hash_matches)) => {
             // Now we have a reference to clone's matches
@@ -169,11 +170,14 @@ fn data() -> std::io::Result<()> {
 use sha1::{Digest, Sha1};
 use std::error::Error;
 
-fn hash_object(file_path: &str) -> Result<(), Box<dyn Error>> {
+fn hash_object(file_path: &str, type_object: Option<&str>) -> Result<(), Box<dyn Error>> {
     // fs::create_dir(RGIT_DIR_OBJECT)?;
-    let data = fs::read(file_path)?;
+    let mut data = fs::read(file_path)?;
+    let begin:Vec<u8> = [type_object.map(str::as_bytes).unwrap_or(b"blob"), b"\x00"].concat();
+    data.splice(0..0, begin);
     let mut hasher = Sha1::new();
     hasher.update(&data);
+    println!("{:?}", data);
     let hash = hex::encode(hasher.finalize());
     let path = format!("{}/objects/{}", RGIT_DIR, hash);
     let mut file = File::create(path)?;
@@ -184,11 +188,17 @@ fn hash_object(file_path: &str) -> Result<(), Box<dyn Error>> {
 fn cat_file(hash: &str) {
     println!(
         "print file {}",
-        String::from_utf8_lossy(&get_object(hash).expect("string"))
+        String::from_utf8_lossy(&get_object(hash, None).expect("string"))
     );
 }
 
-fn get_object(oid: &str) -> io::Result<Vec<u8>> {
+fn get_object(oid: &str, expected: Option<&str>) -> io::Result<Vec<u8>> {
     let file_path = format!("{}/objects/{}", RGIT_DIR, oid);
-    Ok(fs::read(file_path)?)
+    let data = fs::read(file_path)?;
+    let mut split_iter = io::Cursor::new(&data).split(b'\x00').map(|l| l.unwrap());
+    let type_object = split_iter.next().unwrap();
+    if String::from_utf8(type_object.clone()).expect("") != expected.unwrap_or("blob") {
+        panic!("Expected {}, got {:?}", expected.unwrap(), type_object);
+    }
+    Ok(data)
 }
