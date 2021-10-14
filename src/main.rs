@@ -41,11 +41,12 @@
 
 use clap::{App, AppSettings, Arg};
 use hex;
-use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::BufRead;
 use std::io::Write;
+use std::fs;
+use std::path::Path;
 
 fn main() {
     let matches = App::new("rgit")
@@ -55,6 +56,11 @@ fn main() {
         .subcommand(
             App::new("init")
                 .about("init repos")
+                .license("MIT OR Apache-2.0"),
+        )
+        .subcommand(
+            App::new("write-tree")
+                .about("list files")
                 .license("MIT OR Apache-2.0"),
         )
         .subcommand(
@@ -153,6 +159,9 @@ fn main() {
             println!("display file {}", hash);
             cat_file(hash);
         }
+        Some(("write-tree", hash_matches)) => {
+            write_tree(Path::new("."));
+        }
 
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
         _ => unreachable!(), // If all subcommands are defined above, anything else is unreachabe!()
@@ -201,4 +210,24 @@ fn get_object(oid: &str, expected: Option<&str>) -> io::Result<Vec<u8>> {
         panic!("Expected {}, got {:?}", expected.unwrap(), type_object);
     }
     Ok(data)
+}
+
+fn write_tree(dir: &Path) -> io::Result<()> {
+    if dir.is_dir() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let path_to_string = path.to_str().unwrap();
+            if path_to_string.contains(".ugit") {
+                continue;
+            }
+            if path.is_dir() {
+                dbg!(&path);
+                write_tree(&path)?;
+            } else {
+                dbg!("file", &path);
+            }
+        }
+    }
+    Ok(())
 }
