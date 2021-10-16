@@ -151,7 +151,8 @@ fn main() {
             // Now we have a reference to clone's matches
             let file = hash_matches.value_of("file").unwrap();
             println!("Hashing {}", file);
-            hash_object(file, None);
+            let mut data = fs::read(file);
+            hash_object(data.unwrap(), None);
         }
         Some(("cat-file", hash_matches)) => {
             // Now we have a reference to clone's matches
@@ -160,7 +161,7 @@ fn main() {
             cat_file(hash);
         }
         Some(("write-tree", hash_matches)) => {
-            write_tree(Path::new("."));
+            write_tree(Path::new("src/"));
         }
 
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
@@ -179,9 +180,8 @@ fn data() -> std::io::Result<()> {
 use sha1::{Digest, Sha1};
 use std::error::Error;
 
-fn hash_object(file_path: &str, type_object: Option<&str>) -> Result<(), Box<dyn Error>> {
+fn hash_object(mut data:Vec<u8> , type_object: Option<&str>) -> Result<String, Box<dyn Error>> {
     // fs::create_dir(RGIT_DIR_OBJECT)?;
-    let mut data = fs::read(file_path)?;
     let begin:Vec<u8> = [type_object.map(str::as_bytes).unwrap_or(b"blob"), b"\x00"].concat();
     data.splice(0..0, begin);
     let mut hasher = Sha1::new();
@@ -191,7 +191,7 @@ fn hash_object(file_path: &str, type_object: Option<&str>) -> Result<(), Box<dyn
     let path = format!("{}/objects/{}", RGIT_DIR, hash);
     let mut file = File::create(path)?;
     file.write(&data)?;
-    Ok(())
+    Ok(hash)
 }
 
 fn cat_file(hash: &str) {
@@ -212,22 +212,38 @@ fn get_object(oid: &str, expected: Option<&str>) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
-fn write_tree(dir: &Path) -> io::Result<()> {
+fn write_tree(dir: &Path) -> Result<String, Box<dyn Error>> {
+    let mut entries = vec![];
     if dir.is_dir() {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             let path_to_string = path.to_str().unwrap();
+            let _type;
+            let oid;
+
             if path_to_string.contains(".ugit") {
                 continue;
             }
             if path.is_dir() {
-                dbg!(&path);
-                write_tree(&path)?;
+                //dbg!(&path);
+                _type = "tree";
+                oid = write_tree(&path)?;
             } else {
-                dbg!("file", &path);
+                //dbg!("file", &path);
+                _type = "blob";
+                oid = hash_object(fs::read(&path)?, None)?;
+
             }
+            let filename = path.into_os_string().into_string().unwrap();
+            entries.push((filename, oid, _type))
         }
     }
-    Ok(())
+
+    let mut tree = String::new();
+    for (filename, oid, _type) in entries.iter() {
+        tree.push_str(&format!("{} {} {}\n", _type, oid, filename));
+    }
+
+    hash_object(tree.as_bytes().to_vec(), Some("tree"))
 }
