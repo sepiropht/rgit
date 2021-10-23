@@ -40,6 +40,8 @@
 // brevity sake we won't implement all of the subcommands, only a few.
 
 use clap::{App, AppSettings, Arg};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use hex;
 use std::fs::File;
 use std::io;
@@ -56,12 +58,20 @@ fn main() {
         .subcommand(
             App::new("init")
                 .about("init repos")
-                .license("MIT OR Apache-2.0"),
+                .license("MIT OR Apache-2.0")
+                .arg(Arg::new("dir").about("dir path")),
         )
         .subcommand(
             App::new("write-tree")
                 .about("list files")
-                .license("MIT OR Apache-2.0"),
+                .license("MIT OR Apache-2.0")
+                .arg(Arg::new("dir").about("dir of command execution").required(true)),
+        )
+        .subcommand(
+            App::new("read-tree")
+                .about("creat dir from oid")
+                .license("MIT OR Apache-2.0")
+                .arg(Arg::new("tree").about("tree of repo").required(true)),
         )
         .subcommand(
             App::new("hash-object")
@@ -142,10 +152,11 @@ fn main() {
                     .join(", ")
             );
         }
-        Some(("init", _)) => {
+        Some(("init", hash_matches)) => {
             // Now we have a reference to add's matches
+            let dir = hash_matches.value_of("dir").unwrap();
             println!("init a repo");
-            data();
+            data(Some(dir));
         }
         Some(("hash-object", hash_matches)) => {
             // Now we have a reference to clone's matches
@@ -161,7 +172,13 @@ fn main() {
             cat_file(hash);
         }
         Some(("write-tree", hash_matches)) => {
-            write_tree(Path::new("src/"));
+            let dir = hash_matches.value_of("dir").unwrap_or(".");
+            write_tree(Path::new(dir));
+        }
+
+        Some(("read-tree", hash_matches)) => {
+            let tree = hash_matches.value_of("tree").unwrap();
+            read_tree(tree);
         }
 
         None => println!("No subcommand was used"), // If no subcommand was used it'll match the tuple ("", None)
@@ -174,8 +191,9 @@ fn main() {
 static RGIT_DIR: &str = ".rgit";
 static RGIT_DIR_OBJECT: &str = ".rgit/objects";
 
-fn data() -> std::io::Result<()> {
-    fs::create_dir(RGIT_DIR)
+fn data(dir: Option<&str>) -> std::io::Result<()> {
+    let dir = dir.unwrap_or("");
+    fs::create_dir_all(format!("{}{}", dir, RGIT_DIR_OBJECT))
 }
 use sha1::{Digest, Sha1};
 use std::error::Error;
@@ -186,9 +204,9 @@ fn hash_object(mut data:Vec<u8> , type_object: Option<&str>) -> Result<String, B
     data.splice(0..0, begin);
     let mut hasher = Sha1::new();
     hasher.update(&data);
-    println!("{:?}", data);
+    //println!("{:?}", data);
     let hash = hex::encode(hasher.finalize());
-    let path = format!("{}/objects/{}", RGIT_DIR, hash);
+    let path = format!("/tmp/src/{}/objects/{}", RGIT_DIR, hash);
     let mut file = File::create(path)?;
     file.write(&data)?;
     Ok(hash)
@@ -202,7 +220,7 @@ fn cat_file(hash: &str) {
 }
 
 fn get_object(oid: &str, expected: Option<&str>) -> io::Result<Vec<u8>> {
-    let file_path = format!("{}/objects/{}", RGIT_DIR, oid);
+    let file_path = format!("/tmp/src/{}/objects/{}", RGIT_DIR, oid);
     let data = fs::read(file_path)?;
     let mut split_iter = io::Cursor::new(&data).split(b'\x00').map(|l| l.unwrap());
     let type_object = split_iter.next().unwrap();
@@ -222,7 +240,7 @@ fn write_tree(dir: &Path) -> Result<String, Box<dyn Error>> {
             let _type;
             let oid;
 
-            if path_to_string.contains(".ugit") {
+            if path_to_string.contains(".rgit") {
                 continue;
             }
             if path.is_dir() {
@@ -235,15 +253,61 @@ fn write_tree(dir: &Path) -> Result<String, Box<dyn Error>> {
                 oid = hash_object(fs::read(&path)?, None)?;
 
             }
-            let filename = path.into_os_string().into_string().unwrap();
-            entries.push((filename, oid, _type))
+            let filename = path.file_name().unwrap().to_owned();
+            entries.push((filename.clone(), oid, _type))
         }
     }
 
     let mut tree = String::new();
     for (filename, oid, _type) in entries.iter() {
-        tree.push_str(&format!("{} {} {}\n", _type, oid, filename));
+        tree.push_str(&format!("{} {} {:?}\n", _type, oid, filename));
     }
 
     hash_object(tree.as_bytes().to_vec(), Some("tree"))
 }
+
+fn read_tree(tree_oid: &str) {
+    for (path, oid) in &get_tree(tree_oid.to_owned(), Some("/tmp/src/./")) {
+        let dirname = PathBuf::from(path);
+        let dirname = dirname.parent().unwrap();
+        //dbg!(dirname, oid, path);
+        fs::create_dir(dirname);
+        let mut file = File::create(path).expect("file");
+        file.write(&get_object(oid, None).expect("file read")).expect("file");
+    }
+}
+
+fn iter_tree(oid: &str) -> Vec<(String, String, String)> {
+    let tree = get_object(oid, Some("tree")).expect("");
+    let text = String::from_utf8(tree).expect("");
+    text.split("\n").filter(|&x| !x.is_empty()).map(|line| {
+        //dbg!(line);
+        let mut words = line.split(" ");
+        let _type = if words.next().unwrap().contains("blob") {
+            "blob"
+        } else {
+            "tree"
+        };
+        let oid = words.next().unwrap();
+        let name = words.next().unwrap();
+        (_type.to_owned(), oid.to_owned(), name.to_owned())
+    }).collect()
+}
+
+
+fn get_tree(oid: String, base_path: Option<&str>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    dbg!(iter_tree(&oid));
+    for (_type, oid, name) in iter_tree(&oid).iter() {
+        let base_path = base_path.unwrap_or("");
+        let path = format!("{}{}", base_path, name);
+        if _type == "blob" {
+            map.insert(path, oid.to_owned());
+        } else {
+           // dbg!(&format!("{}/", path));
+            map.extend(get_tree (oid.to_owned(), Some(&format!("{}/", path))));
+        }
+    }
+    map
+}
+
